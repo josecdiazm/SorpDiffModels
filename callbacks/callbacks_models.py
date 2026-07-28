@@ -93,8 +93,7 @@ def update_equation_content(model_key):
     Output("model-alert", "children"),
     Input("model-run-btn", "n_clicks"),
     State("model-dataset-picker", "value"),
-    State("model-select", "value"),
-    State("model-compare-check", "value"),
+    State("model-compare-picker", "value"),
     State({"type": "model-predict-check", "index": ALL}, "value"),
     State({"type": "model-predict-check", "index": ALL}, "id"),
     State({"type": "model-b-input", "index": ALL}, "value"),
@@ -102,14 +101,13 @@ def update_equation_content(model_key):
     State("datasets-store", "data"),
     prevent_initial_call=True,
 )
-def run_models(n_clicks, dataset_ids, primary_model, compare_all,
+def run_models(n_clicks, dataset_ids, model_keys,
                 predict_vals, predict_ids, b_vals, b_ids, datasets):
     dataset_ids = dataset_ids or []
+    model_keys = model_keys or []
     datasets = datasets or {}
     predict_map = {i["index"]: v for i, v in zip(predict_ids, predict_vals)}
     b_map = {i["index"]: v for i, v in zip(b_ids, b_vals)}
-
-    model_keys = list(MODEL_REGISTRY.keys()) if compare_all else [primary_model]
 
     warnings = []
     fig = go.Figure()
