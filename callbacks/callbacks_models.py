@@ -2,20 +2,62 @@
 Dash callbacks for the Sorption Models tab.
 """
 
+import colorsys
+
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-from dash import ALL, MATCH, Input, Output, State, callback, html
+from dash import ALL, MATCH, Input, Output, State, callback, dcc, html
 
 from tabs.tab_data import PITZER_PARAMS
 from tabs.tab_models import MODEL_REGISTRY, build_equation_content, build_per_dataset_controls
 from utils.dataset_utils import extract_series
 from utils.model_runner import run_model
+from utils.sorption_models import bjerrum_length
 
-# Plotly's default qualitative sequence, assigned explicitly (one color per dataset,
-# reused across every model/mode for that dataset) so measured points and model curves
-# for the same dataset always match.
+# Plotly's default qualitative sequence, assigned explicitly (one color *family* per
+# dataset, reused across every model/mode for that dataset) so measured points and model
+# curves for the same dataset are always visually related.
 _PALETTE = ["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
             "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"]
+
+# Stable per-model index (from MODEL_REGISTRY's fixed order), independent of which subset
+# is selected in a given run, so a given model always gets the same shade/dash.
+_MODEL_INDEX = {key: i for i, key in enumerate(MODEL_REGISTRY.keys())}
+
+# 3 models x 2 modes (predicted/fitted) = 6, matching Plotly's 6 built-in dash values
+# exactly; degrades gracefully (cycles) once more models are registered.
+_DASH_STYLES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"]
+
+
+def _dash_for(model_key, predicted):
+    idx = _MODEL_INDEX.get(model_key, 0) * 2 + (0 if predicted else 1)
+    return _DASH_STYLES[idx % len(_DASH_STYLES)]
+
+
+def _xi_values(dataset, b):
+    """(xi, xi_crit) for a Manning-family row's b: xi = Bjerrum length / b (companion
+    derivation notes Eq. 14), xi_crit = 1/|zA*zg|, the theory-only threshold above which
+    counter-ion condensation sets in. None, None when there's no b (Ideal Donnan)."""
+    if b is None:
+        return None, None
+    mp = dataset["membrane_params"]
+    lb = bjerrum_length(mp["phiw_DI"], mp["T"])
+    xi = lb / b
+    xi_crit = 1 / abs(mp["zA"] * mp["zg"])
+    return xi, xi_crit
+
+
+def _shade_color(hex_color, model_index):
+    """Same hue/dataset family, lightness nudged per model so curves for the same
+    dataset are still individually easy to pick out: base, then alternating
+    lighter/darker steps (+0.14, -0.14, +0.28, -0.28, ...)."""
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    step = ((model_index + 1) // 2) * 0.14
+    direction = 1 if model_index % 2 else -1
+    l = min(0.92, max(0.08, l + direction * step))
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return "#{:02x}{:02x}{:02x}".format(round(r2 * 255), round(g2 * 255), round(b2 * 255))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,17 +197,22 @@ def run_models(n_clicks, dataset_ids, model_keys,
                 )
                 continue
 
+            model_shade = _shade_color(color, _MODEL_INDEX.get(model_key, 0))
+
             if predictive is not None:
                 df = predictive["table"]
                 pred_col = [c for c in df.columns if "Predicted" in c][0]
                 fig.add_trace(go.Scatter(
                     x=df["Css (m)"], y=df[pred_col], mode="lines",
                     name=f"{dataset['name']} — {model_label} (predicted)",
-                    line=dict(color=color, dash="solid"),
+                    line=dict(color=model_shade, dash=_dash_for(model_key, True)),
                 ))
+                xi, xi_crit = _xi_values(dataset, predictive["b"])
                 result_rows.append([dataset["name"], model_label, "Predicted",
                                      f"{predictive['b']:.4g}" if predictive["b"] is not None else "—",
-                                     f"{predictive['rmsle']:.4g}" if predictive["rmsle"] is not None else "—"])
+                                     f"{predictive['rmsle']:.4g}" if predictive["rmsle"] is not None else "—",
+                                     f"{xi:.4g}" if xi is not None else "—",
+                                     f"{xi_crit:.4g}" if xi_crit is not None else "—"])
 
             if fitted is not None:
                 df = fitted["table"]
@@ -173,10 +220,13 @@ def run_models(n_clicks, dataset_ids, model_keys,
                 fig.add_trace(go.Scatter(
                     x=df["Css (m)"], y=df[fit_col], mode="lines",
                     name=f"{dataset['name']} — {model_label} (fitted)",
-                    line=dict(color=color, dash="dash"),
+                    line=dict(color=model_shade, dash=_dash_for(model_key, False)),
                 ))
+                xi, xi_crit = _xi_values(dataset, fitted["b_fit"])
                 result_rows.append([dataset["name"], model_label, "Fitted",
-                                     f"{fitted['b_fit']:.4g}", f"{fitted['rmsle']:.4g}"])
+                                     f"{fitted['b_fit']:.4g}", f"{fitted['rmsle']:.4g}",
+                                     f"{xi:.4g}" if xi is not None else "—",
+                                     f"{xi_crit:.4g}" if xi_crit is not None else "—"])
 
     fig.update_layout(
         title="Sorption Isotherm",
@@ -188,9 +238,14 @@ def run_models(n_clicks, dataset_ids, model_keys,
     )
 
     if result_rows:
-        cols = ["Dataset", "Model", "Mode", "b (Å)", "RMSLE"]
+        plain_cols = ["Dataset", "Model", "Mode", "b (Å)", "RMSLE"]
+        header_cells = [html.Th(c) for c in plain_cols]
+        header_cells += [
+            html.Th(dcc.Markdown(r"Predicted $\xi$", mathjax=True)),
+            html.Th(dcc.Markdown(r"Theoretical $\xi$", mathjax=True)),
+        ]
         table = dbc.Table(
-            [html.Thead(html.Tr([html.Th(c) for c in cols]))] +
+            [html.Thead(html.Tr(header_cells))] +
             [html.Tbody([html.Tr([html.Td(cell) for cell in row]) for row in result_rows])],
             bordered=True, hover=True, responsive=True, size="sm",
         )
