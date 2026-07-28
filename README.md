@@ -11,7 +11,7 @@ The underlying physics follows Kitto & Kamcev, *J. Polym. Sci.* **2022**, *60*, 
 | **Data** | Build one or more named datasets, each collapsible to a one-line summary and reopenable for editing.<ul><li>Per-dataset membrane parameters (zg, zc, zA, φw,DI, CAm,w,DI, T, salt)</li><li>A user-columned data table (add/remove/rename rows and columns freely) for concentration-dependent data</li><li>A column → model-parameter role mapping under each table, so arbitrarily-named columns (e.g. "Css (m)" vs "External conc.") still resolve unambiguously to what the model needs — the free-text column name is just for your own bookkeeping</li></ul> |
 | **Sorption Models** | Pick one or more datasets and one or more models — Ideal Donnan, Donnan–Manning (Kamcev et al.), Modified Donnan–Manning (Galizia et al.) — to compare, then predict and/or fit.<ul><li>Per-dataset Predict checkbox + b input: unchecked fits b from that dataset's measured Csm,w; checked forward-predicts from a known b (both can run together)</li><li>Collapsible LaTeX derivation panel per model, from the companion derivation notes</li><li>Log-log isotherm plot — color per dataset, a distinct line shade + dash style per model — plus a results table (b, RMSLE, predicted ξ, theoretical ξ)</li></ul> |
 
-A Manning–Meares diffusion tab is planned — see `utils/sorption_models.py` for the underlying computation already ported from the original MATLAB code.
+A Manning–Meares diffusion tab is planned — see `utils/sorption_models.py` for the underlying computation.
 
 ## Setup
 
