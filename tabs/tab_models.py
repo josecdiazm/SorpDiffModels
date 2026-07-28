@@ -103,11 +103,17 @@ layout = dbc.Container(
                       "marginBottom": "10px"}),
 
             html.Div([
-                html.Span("Model:", style=_LABEL_STYLE),
+                html.Span("Models to compare:", style=_LABEL_STYLE),
+                dcc.Dropdown(id="model-compare-picker", options=MODEL_OPTIONS,
+                             value=["ideal_donnan"], multi=True,
+                             style={"flex": "1", "minWidth": "320px"}),
+            ], style={"display": "flex", "alignItems": "center", "gap": "8px",
+                      "marginBottom": "10px"}),
+
+            html.Div([
+                html.Span("Show derivation for:", style=_LABEL_STYLE),
                 dbc.Select(id="model-select", options=MODEL_OPTIONS, value="ideal_donnan",
-                           size="sm", style={"width": "340px", "marginRight": "20px"}),
-                dbc.Checkbox(id="model-compare-check", value=False,
-                             label="Compare all models"),
+                           size="sm", style={"width": "340px"}),
             ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
 
             html.Div("Per-dataset settings (unchecked = fit b from measured data)",
