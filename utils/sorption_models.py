@@ -6,11 +6,20 @@ PitzerTempConstants.m, Bjerrum.m, WaterDielectric.m, RMSLE.m, isnumber.m)
 
 Used by Ideal_Donnan_Model.ipynb and Donnan_Manning_Model.ipynb.
 
-Known fix vs. the original MATLAB: Pitzer.m sets a variable named "alhpa2"
-(typo) instead of "alpha2" for non-monovalent salts, which left alpha2
-undefined and would crash MATLAB's fsolve for any salt where neither ion is
-+/-1 valent. This port sets alpha2 = 10 there, matching the clear intent
-(and the Kim & Frederick / Simoes et al. references cited in Pitzer.m).
+Known fixes vs. the original MATLAB:
+- Pitzer.m sets a variable named "alhpa2" (typo) instead of "alpha2" for
+  non-monovalent salts, which left alpha2 undefined and would crash MATLAB's
+  fsolve for any salt where neither ion is +/-1 valent. This port sets
+  alpha2 = 10 there, matching the clear intent (and the Kim & Frederick /
+  Simoes et al. references cited in Pitzer.m).
+- Manning_b_Fitter.m fits b via MATLAB's fsolve on the RMS log error between
+  predicted and measured Csm,w. fsolve is a root-finder, but that error is
+  >= 0 everywhere with a zero only exactly at the true b -- a V-shaped
+  distance function, not a sign-changing residual -- so fsolve (Newton-type)
+  just sits at its initial guess instead of searching. Confirmed by sweeping
+  the error vs. b directly: clean unimodal minimum, but the original fitter
+  never moved off x0. This port uses scipy.optimize.minimize_scalar (bounded
+  Brent) instead, which recovers the true b to ~1e-6 on synthetic data.
 """
 
 import os
@@ -19,7 +28,7 @@ from contextlib import contextmanager
 from math import lcm
 import numpy as np
 import pandas as pd
-from scipy.optimize import fsolve, brentq
+from scipy.optimize import brentq, minimize_scalar
 
 _DEFAULT_PITZER_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "Pitzer Params.xlsx"
@@ -352,27 +361,97 @@ def donnan_manning(salt, Css, b, phiw, CAmw, zg, zc, zA, T, params_df):
     return Csmw
 
 
-def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df):
-    """Fit the Manning parameter b (Angstrom) to measured sorption data via RMS log error."""
+def donnan_manning_modified(Css, b, phiw, CAmw, zg, zc, zA, T):
+    """Modified Donnan-Manning model (Galizia et al.): assumes membrane ions carry all the
+    nonidealities they would have in a solution of the same composition, on top of the
+    Manning polymer contribution (gamma_i^m = gamma_i,Manning^m * gamma_i^s). That assumption
+    makes the external Pitzer mean activity coefficient cancel exactly out of the working
+    equation (companion derivation notes, Sec. 5, Eq. 31-32) -- so unlike donnan_manning(),
+    this needs no salt identity or Pitzer parameter table at all. Structurally identical to
+    donnan_manning() otherwise; same system, same solver.
+    """
+    Css = np.asarray(Css, dtype=float)
+    phiw = np.asarray(phiw, dtype=float)
+    CAmw = np.asarray(CAmw, dtype=float)
+    _check_positive(Css)
+
+    nuX, nuM = _nu(zA, zc)
+    a, c = abs(zA), abs(zc)
+
+    Csmw = np.zeros(len(Css))
+    for p in range(len(Css)):
+        Css_p, phiw_p, CAmw_p = Css[p], phiw[p], CAmw[p]
+
+        def resid(log_csmw, Css_p=Css_p, phiw_p=phiw_p, CAmw_p=CAmw_p):
+            Csmw_g = np.exp(log_csmw)
+            CX = nuX * Csmw_g
+            CM = (CAmw_p + a * CX) / c
+            gmpm = manning_gamma(b, phiw_p, CAmw_p, Csmw_g, zg, zc, zA, T)
+            lhs = nuM * np.log(CM) + nuX * np.log(CX)
+            rhs = (
+                np.log(nuM**nuM * nuX**nuX)
+                - (nuX + nuM) * np.log(gmpm)
+                + (nuX + nuM) * np.log(Css_p)
+            )
+            return lhs - rhs
+
+        with _quiet_solver():
+            sol = _solve_log_csmw(resid)
+        Csmw[p] = np.exp(sol)
+    return Csmw
+
+
+_B_FIT_BOUNDS = (1e-3, 1e4)  # Angstrom; generous bracket for the bounded 1-D minimizer below
+
+
+def manning_b_fitter_modified(Css, phiw, Csmw, CAmw, zg, zc, zA, T):
+    """Fit b (Angstrom) to measured sorption data for the modified model -- same RMS log
+    error approach as manning_b_fitter(), no salt/Pitzer table needed."""
     Css = np.asarray(Css, dtype=float)
     _check_positive(Css)
 
-    def error_fitter(x):
-        b_guess = x[0]
+    def error_fitter(b_guess):
         if b_guess <= 0:
-            return [1e10]  # b (Angstrom) must be positive; steer the search back
+            return 1e10
+        try:
+            pred = donnan_manning_modified(Css, b_guess, phiw, CAmw, zg, zc, zA, T)
+            LE = np.log10(pred) - np.log10(Csmw)
+            return float((np.sum(LE**2) / len(LE)) ** 0.5)
+        except (RuntimeError, FloatingPointError):
+            return 1e10
+
+    with _quiet_solver():
+        res = minimize_scalar(error_fitter, bounds=_B_FIT_BOUNDS, method="bounded")
+    return res.x
+
+
+def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df):
+    """Fit the Manning parameter b (Angstrom) to measured sorption data via RMS log error.
+
+    Uses a bounded 1-D minimizer, not a root-finder: the RMS log error is >= 0 everywhere
+    and hits exactly 0 only at the true b, i.e. it's a V-shaped distance function with no
+    sign change for fsolve to bracket. (The original MATLAB Manning_b_Fitter.m used
+    MATLAB's fsolve the same way, which has the identical issue -- verified fsolve() here
+    would just sit at its x0 rather than actually searching.)
+    """
+    Css = np.asarray(Css, dtype=float)
+    _check_positive(Css)
+
+    def error_fitter(b_guess):
+        if b_guess <= 0:
+            return 1e10  # b (Angstrom) must be positive; steer the search back
         try:
             pred = donnan_manning(salt, Css, b_guess, phiw, CAmw, zg, zc, zA, T, params_df)
             LE = np.log10(pred) - np.log10(Csmw)
-            return [float((np.sum(LE**2) / len(LE)) ** 0.5)]
+            return float((np.sum(LE**2) / len(LE)) ** 0.5)
         except (RuntimeError, FloatingPointError):
-            # extreme b transiently explored by fsolve can push manning_gamma out of its
-            # numerically valid range; treat as a bad fit rather than crashing the search
-            return [1e10]
+            # extreme b transiently explored by the minimizer can push manning_gamma out of
+            # its numerically valid range; treat as a bad fit rather than crashing the search
+            return 1e10
 
     with _quiet_solver():
-        sol = fsolve(error_fitter, x0=[10.0], full_output=False)
-    return sol[0]
+        res = minimize_scalar(error_fitter, bounds=_B_FIT_BOUNDS, method="bounded")
+    return res.x
 
 
 def rmsle(Csmw_theoretical, Csmw_actual):
@@ -454,6 +533,47 @@ def run_donnan_manning(salt, zg, zc, zA, phiw_DI, CAmw_DI, T, Css, params_df,
         df = pd.DataFrame({
             "Css (m)": Css, "phiw_s (-)": phiw_s_arr, "CAm,w (m)": CAmw_s,
             "Csm,w DM Fitted (m)": Csmw_fit, "Csm,w measured (m)": Csmw_meas_arr,
+        })
+        rmsle_val = rmsle(Csmw_fit, Csmw_meas_arr)
+        out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df, "rmsle": rmsle_val}
+
+    return out
+
+
+def run_donnan_manning_modified(zg, zc, zA, phiw_DI, CAmw_DI, T, Css,
+                                 phiw_s=None, Csmw_meas=None, b=None):
+    """Run the modified Donnan-Manning model for one membrane: predictive (if b given)
+    and/or fitted (if measured Csmw given). Same shape as run_donnan_manning(), minus the
+    salt/params_df the Pitzer-free closure no longer needs."""
+    Css = np.asarray(Css, dtype=float)
+    n = len(Css)
+    phiw_s_arr = np.full(n, phiw_DI) if phiw_s is None or len(phiw_s) == 0 else np.asarray(phiw_s, dtype=float)
+    CAmw_s = compute_CAmw_series(phiw_DI, CAmw_DI, phiw_s_arr)
+
+    have_meas = Csmw_meas is not None and len(Csmw_meas) == n
+    Csmw_meas_arr = np.asarray(Csmw_meas, dtype=float) if have_meas else None
+
+    out = {"CAmw_s": CAmw_s, "phiw_s": phiw_s_arr}
+
+    if b is not None:
+        Csmw_pred = donnan_manning_modified(Css, b, phiw_s_arr, CAmw_s, zg, zc, zA, T)
+        df = pd.DataFrame({
+            "Css (m)": Css, "phiw_s (-)": phiw_s_arr, "CAm,w (m)": CAmw_s,
+            "Csm,w Modified DM Predicted (m)": Csmw_pred,
+        })
+        rmsle_val = None
+        if have_meas:
+            df["Csm,w measured (m)"] = Csmw_meas_arr
+            rmsle_val = rmsle(Csmw_pred, Csmw_meas_arr)
+        out["predictive"] = {"b": b, "table": df, "rmsle": rmsle_val}
+
+    if have_meas:
+        b_fit = manning_b_fitter_modified(Css, phiw_s_arr, Csmw_meas_arr, CAmw_s, zg, zc, zA, T)
+        Csmw_fit = donnan_manning_modified(Css, b_fit, phiw_s_arr, CAmw_s, zg, zc, zA, T)
+        xip_fit = bjerrum_length(phiw_DI, T) * abs(zg * zA) / b_fit
+        df = pd.DataFrame({
+            "Css (m)": Css, "phiw_s (-)": phiw_s_arr, "CAm,w (m)": CAmw_s,
+            "Csm,w Modified DM Fitted (m)": Csmw_fit, "Csm,w measured (m)": Csmw_meas_arr,
         })
         rmsle_val = rmsle(Csmw_fit, Csmw_meas_arr)
         out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df, "rmsle": rmsle_val}

@@ -1,0 +1,22 @@
+/* Make the active top-level tab impossible to miss: invert Flatly's
+   active-tab text color (#18bc9c) into a solid highlight — green
+   background, white text — instead of just a colored underline/label. */
+.nav-tabs .nav-link.active,
+.nav-tabs .nav-link.active:hover,
+.nav-tabs .nav-link.active:focus {
+    background-color: #18bc9c;
+    color: #ffffff;
+    border-color: #18bc9c #18bc9c #18bc9c;
+}
+
+/* Inline LaTeX (MathJax) parameter labels: dcc.Markdown wraps its output in
+   a <p>, which breaks alignment inside a flex row of label+input pairs. */
+.param-label {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 3px;
+}
+.param-label p {
+    margin: 0;
+    font-size: 12px;
+}
