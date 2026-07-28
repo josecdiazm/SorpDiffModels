@@ -58,23 +58,24 @@ def new_dataset(name):
 
 
 def build_rolemap_children(dataset_id, columns, roles):
-    """One small role-select per current column, keyed by the column's stable id."""
+    """One small role-select per current column, keyed by the column's stable id.
+    Stacked vertically (label above select) since this now lives in a narrow sidebar."""
     items = []
     for col in columns:
         col_id = col["id"]
         items.append(
             html.Div([
                 html.Span(col["name"], style={"fontSize": "11px", "color": "#666",
-                                               "marginRight": "4px", "whiteSpace": "nowrap"}),
+                                               "display": "block", "marginBottom": "2px",
+                                               "wordBreak": "break-word"}),
                 dbc.Select(
                     id={"type": "dataset-role-select", "index": dataset_id, "col": col_id},
                     options=ROLE_OPTIONS,
                     value=roles.get(col_id, ""),
                     size="sm",
-                    style={"width": "230px", "fontSize": "11px", "display": "inline-block"},
+                    style={"width": "100%", "fontSize": "11px"},
                 ),
-            ], style={"display": "flex", "alignItems": "center", "marginRight": "16px",
-                      "marginBottom": "4px"})
+            ], style={"marginBottom": "10px"})
         )
     return items
 
@@ -108,53 +109,61 @@ def build_membrane_params_block(dataset_id, membrane_params):
 
 
 def build_dataset_item(dataset_id, dataset):
+    left = html.Div([
+        html.Div([
+            html.Span("Dataset Name:", style=_LABEL_STYLE),
+            dcc.Input(
+                id={"type": "dataset-name", "index": dataset_id},
+                type="text", value=dataset["name"], debounce=True,
+                style={"width": "220px", "marginRight": "14px"},
+            ),
+            dbc.Button("Delete Dataset", id={"type": "dataset-delete", "index": dataset_id},
+                       color="danger", outline=True, size="sm"),
+        ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
+
+        html.Div("Membrane parameters", style={"fontWeight": "bold", "fontSize": "13px",
+                                                 "marginBottom": "4px"}),
+        build_membrane_params_block(dataset_id, dataset["membrane_params"]),
+
+        html.Div("Concentration-dependent data", style={"fontWeight": "bold", "fontSize": "13px",
+                                                          "marginBottom": "4px"}),
+        dash_table.DataTable(
+            id={"type": "dataset-table", "index": dataset_id},
+            columns=dataset["columns"],
+            data=dataset["rows"],
+            editable=True,
+            row_deletable=True,
+            style_table={"overflowX": "auto"},
+            style_cell={"fontSize": "12px", "padding": "4px 8px", "textAlign": "center",
+                        "border": "1px solid #ccc", "minWidth": "110px"},
+            style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
+        ),
+        html.Div([
+            dbc.Button("+ Add Row", id={"type": "dataset-addrow", "index": dataset_id},
+                       color="secondary", size="sm", outline=True, className="mt-2 me-2"),
+            dbc.Button("+ Add Column", id={"type": "dataset-addcol", "index": dataset_id},
+                       color="secondary", size="sm", outline=True, className="mt-2"),
+        ]),
+    ], style={"width": "calc(85% - 1px)"})
+
+    right = html.Div([
+        html.Div("Column → model parameter mapping",
+                  style={"fontWeight": "bold", "fontSize": "13px", "marginBottom": "8px"}),
+        html.Div(
+            build_rolemap_children(dataset_id, dataset["columns"], dataset["roles"]),
+            id={"type": "dataset-rolemap", "index": dataset_id},
+        ),
+    ], style={"width": "calc(15% - 13px)", "paddingLeft": "12px"})
+
+    divider = html.Div(style={"width": "1px", "backgroundColor": "#dee2e6",
+                               "alignSelf": "stretch"})
+
     return dbc.AccordionItem(
         title=dataset["name"],
         item_id=dataset_id,
         children=[
-            html.Div([
-                html.Span("Dataset Name:", style=_LABEL_STYLE),
-                dcc.Input(
-                    id={"type": "dataset-name", "index": dataset_id},
-                    type="text", value=dataset["name"], debounce=True,
-                    style={"width": "220px", "marginRight": "14px"},
-                ),
-                dbc.Button("Delete Dataset", id={"type": "dataset-delete", "index": dataset_id},
-                           color="danger", outline=True, size="sm"),
-            ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
-
-            html.Div("Membrane parameters", style={"fontWeight": "bold", "fontSize": "13px",
-                                                     "marginBottom": "4px"}),
-            build_membrane_params_block(dataset_id, dataset["membrane_params"]),
-
-            html.Div("Concentration-dependent data", style={"fontWeight": "bold", "fontSize": "13px",
-                                                              "marginBottom": "4px"}),
-            dash_table.DataTable(
-                id={"type": "dataset-table", "index": dataset_id},
-                columns=dataset["columns"],
-                data=dataset["rows"],
-                editable=True,
-                row_deletable=True,
-                style_table={"overflowX": "auto"},
-                style_cell={"fontSize": "12px", "padding": "4px 8px", "textAlign": "center",
-                            "border": "1px solid #ccc", "minWidth": "110px"},
-                style_header={"fontWeight": "bold", "backgroundColor": "#f8f9fa"},
-            ),
-            html.Div([
-                dbc.Button("+ Add Row", id={"type": "dataset-addrow", "index": dataset_id},
-                           color="secondary", size="sm", outline=True, className="mt-2 me-2"),
-                dbc.Button("+ Add Column", id={"type": "dataset-addcol", "index": dataset_id},
-                           color="secondary", size="sm", outline=True, className="mt-2"),
-            ]),
-
-            html.Div("Column → model parameter mapping",
-                      style={"fontWeight": "bold", "fontSize": "13px", "marginTop": "10px",
-                             "marginBottom": "4px"}),
-            html.Div(
-                build_rolemap_children(dataset_id, dataset["columns"], dataset["roles"]),
-                id={"type": "dataset-rolemap", "index": dataset_id},
-                style={"display": "flex", "flexWrap": "wrap"},
-            ),
+            html.Div([left, divider, right],
+                      style={"display": "flex", "alignItems": "flex-start"}),
         ],
     )
 
