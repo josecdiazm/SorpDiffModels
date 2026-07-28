@@ -60,7 +60,8 @@ def build_equation_content(model_key):
     return html.Div([
         dcc.Markdown(m["equation_md"], mathjax=True),
         dcc.Markdown(ELECTRONEUTRALITY_MD, mathjax=True),
-        html.P(m["note"], style={"fontSize": "12px", "color": "#666", "marginTop": "6px"}),
+        dcc.Markdown(m["note"], mathjax=True,
+                      style={"fontSize": "12px", "color": "#666", "marginTop": "6px"}),
     ])
 
 
