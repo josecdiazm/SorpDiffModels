@@ -15,7 +15,10 @@ from utils.sorption_models import (
 )
 
 
-def run_model(model_key, dataset, css, phiw_s, csmw_meas, predict, b, params_df):
+def run_model(model_key, dataset, css, phiw_s, csmw_meas, params_df):
+    """b is read from the dataset's own membrane_params (a structural property of that
+    membrane, set once in the Data tab) rather than passed in per call: set -> predicts
+    with it, blank -> fits it from csmw_meas instead. Ideal Donnan has no b at all."""
     mp = dataset["membrane_params"]
     zg, zc, zA = mp["zg"], mp["zc"], mp["zA"]
     phiw_DI, CAmw_DI, T = mp["phiw_DI"], mp["CAmw_DI"], mp["T"]
@@ -27,7 +30,7 @@ def run_model(model_key, dataset, css, phiw_s, csmw_meas, predict, b, params_df)
         df = df.rename(columns={"Csm,w Ideal Donnan (m)": "Csm,w Predicted (m)"})
         return {"predictive": {"b": None, "table": df, "rmsle": rmsle_val}, "fitted": None}
 
-    b_arg = b if predict else None
+    b = mp.get("b")
 
     if model_key == "donnan_manning":
         salt = mp.get("salt")
@@ -35,13 +38,13 @@ def run_model(model_key, dataset, css, phiw_s, csmw_meas, predict, b, params_df)
             raise ValueError(f"Dataset '{dataset['name']}': Donnan-Manning needs a salt selected in the Data tab.")
         return run_donnan_manning(
             salt, zg, zc, zA, phiw_DI, CAmw_DI, T, css, params_df,
-            phiw_s=phiw_s, Csmw_meas=csmw_meas, b=b_arg,
+            phiw_s=phiw_s, Csmw_meas=csmw_meas, b=b,
         )
 
     if model_key == "donnan_manning_modified":
         return run_donnan_manning_modified(
             zg, zc, zA, phiw_DI, CAmw_DI, T, css,
-            phiw_s=phiw_s, Csmw_meas=csmw_meas, b=b_arg,
+            phiw_s=phiw_s, Csmw_meas=csmw_meas, b=b,
         )
 
     raise ValueError(f"Unknown model key: {model_key!r}")
