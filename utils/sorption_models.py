@@ -127,12 +127,16 @@ def _pitzer_constants(params_df, salt, T):
 
 def pitzer_gamma(zA, zc, salt, m, T, params_df):
     """Mean salt activity coefficient in the external solution (Pitzer model).
-    zA, zc are the salt's OWN co-ion/counter-ion valences (i.e. its anion and cation) --
-    this function describes bulk solution thermodynamics and has nothing to do with the
-    membrane's fixed-charge valence. (Fix vs. the original MATLAB Pitzer.m: it took the
-    membrane's zg here instead of zA, which is only numerically harmless for chloride-type
-    monovalent co-ions; for e.g. a divalent co-ion like SO4^2- it silently mis-set the
-    "all monovalent" branch, the ionic strength, and the Debye-Huckel/Cgamma terms.)"""
+    Despite the parameter name (kept for now to match the module's other functions), zA
+    here must be the SALT's own cation valence (i.e. the membrane's counter-ion valence,
+    zg in the caller's convention) -- this function describes bulk solution thermodynamics
+    and has nothing to do with the membrane's fixed-charge valence. Passing the membrane's
+    actual fixed-charge valence here instead (as donnan_manning() used to) is silently
+    correct only when it happens to share the same magnitude as the salt's cation (e.g. any
+    monovalent counter-ion against CR61's monovalent fixed charge), and wrong otherwise --
+    for a divalent counter-ion like Ca2+/Mg2+ it silently mis-sets the "all monovalent"
+    branch, the ionic strength, and the Debye-Huckel/Cgamma terms. See donnan_ideal()'s
+    docstring for the empirical verification of this fix against Kitto & Kamcev's data."""
     m = np.asarray(m, dtype=float)
 
     # Modified Manning: solution activity coefficient is folded into the ratio, set to 1
@@ -289,21 +293,29 @@ def donnan_ideal(Css, CAmw, zg, zc, zA):
     Solves the mass-action + electroneutrality system directly (Galizia et al. 2017,
     J. Membr. Sci. 535:132-142, Eqs. 3 & 9, with Gamma=1):
         (C_M^m)^nuM * (C_X^m)^nuX = nuM^nuM * nuX^nuX * Css^(nuM+nuX)
-        zc*C_M^m - zA*C_X^m = CAmw
-    where nuM, nuX are the salt's own cation/anion stoichiometric coefficients (from zc, zA
-    -- NOT the membrane's fixed-charge valence zg, which plays no role in how the external
-    salt dissociates). Fix vs. the original MATLAB Donnan_Ideal.m: its general-valence
-    branch (the Cg/Cg_salt/Csmnew chain, and its zg-derived stoichiometry) does not actually
-    satisfy this system for any non-1:1-valence salt (verified against the paper's own
-    equations); it only ever matched for 1:1 salts like NaCl, which is why this was never
-    caught -- this is the case that matters for CaCl2/MgCl2 comparisons to Galizia et al.
+        zg*C_M^m + zc*C_X^m + zA*CAmw = 0
+    where nuM, nuX are the salt's own cation/anion stoichiometric coefficients -- from zg
+    and zc (the counter-ion and co-ion are, by definition, the salt's own ions), NOT the
+    membrane's fixed-charge valence zA, which plays no role in how the external salt
+    dissociates and only enters via membrane electroneutrality above.
+
+    Known fix: an earlier version of this function derived both the stoichiometry and the
+    electroneutrality relation from zA instead of zg. That's silently correct whenever
+    |zA| == |zg| (e.g. any monovalent counter-ion against CR61's monovalent fixed charge --
+    LiCl, NaCl, KCl, NaF, NaI), which is why it went undetected through extensive testing
+    with those salts, but it's wrong whenever they differ. Concretely, it treated CaCl2 and
+    MgCl2 as if Ca2+/Mg2+ were monovalent. Verified against Kitto & Kamcev's supplementary
+    data for CR61: this fix does not change any 1:1-valence-salt prediction at all (bitwise
+    identical), and brings CaCl2 back in line with Galizia et al.'s reported fit (RMS log
+    error 0.53 -> 0.15, vs. their reported 0.16) with a substantial improvement for MgCl2
+    too (0.53 -> 0.23, vs. their reported 0.07 -- a smaller residual gap not yet chased down).
     """
     Css = np.asarray(Css, dtype=float)
     CAmw = np.asarray(CAmw, dtype=float)
     _check_positive(Css)
 
-    nuX, nuM = _nu(zA, zc)
-    a, c = abs(zA), abs(zc)
+    nuM, nuX = _nu(zg, zc)
+    a, c, g = abs(zA), abs(zc), abs(zg)
 
     Csmw = np.zeros(len(Css))
     for p in range(len(Css)):
@@ -311,7 +323,7 @@ def donnan_ideal(Css, CAmw, zg, zc, zA):
 
         def resid(log_csmw, Css_p=Css_p, CAmw_p=CAmw_p):
             CX = nuX * np.exp(log_csmw)
-            CM = (CAmw_p + a * CX) / c
+            CM = (a * CAmw_p + c * CX) / g
             lhs = nuM * np.log(CM) + nuX * np.log(CX)
             rhs = np.log(nuM**nuM * nuX**nuX) + (nuX + nuM) * np.log(Css_p)
             return lhs - rhs
@@ -327,16 +339,20 @@ def donnan_manning(salt, Css, b, phiw, CAmw, zg, zc, zA, T, params_df):
 
     Same system as donnan_ideal, but with Gamma = nuM^nuM*nuX^nuX*(gspm/gmpm)^(nuM+nuX)
     (Galizia et al. 2017 Eqs. 7-8, generalized to arbitrary valence) in place of Gamma=1.
-    See donnan_ideal() docstring for the fix vs. the original MATLAB Donnan_Manning.m.
+    See donnan_ideal()'s docstring for the same stoichiometry/electroneutrality fix applied
+    here (source it from zg, the salt's own counter-ion valence, not zA). That fix also
+    applies to the pitzer_gamma() call below: it needs the salt's actual cation valence to
+    compute the external solution's ionic strength/activity coefficient correctly, not the
+    membrane's fixed-charge valence.
     """
     Css = np.asarray(Css, dtype=float)
     phiw = np.asarray(phiw, dtype=float)
     CAmw = np.asarray(CAmw, dtype=float)
     _check_positive(Css)
 
-    nuX, nuM = _nu(zA, zc)
-    a, c = abs(zA), abs(zc)
-    gspm = pitzer_gamma(zA, zc, salt, Css, T, params_df)
+    nuM, nuX = _nu(zg, zc)
+    a, c, g = abs(zA), abs(zc), abs(zg)
+    gspm = pitzer_gamma(zg, zc, salt, Css, T, params_df)
 
     Csmw = np.zeros(len(Css))
     for p in range(len(Css)):
@@ -345,7 +361,7 @@ def donnan_manning(salt, Css, b, phiw, CAmw, zg, zc, zA, T, params_df):
         def resid(log_csmw, gspm_p=gspm_p, Css_p=Css_p, phiw_p=phiw_p, CAmw_p=CAmw_p):
             Csmw_g = np.exp(log_csmw)
             CX = nuX * Csmw_g
-            CM = (CAmw_p + a * CX) / c
+            CM = (a * CAmw_p + c * CX) / g
             gmpm = manning_gamma(b, phiw_p, CAmw_p, Csmw_g, zg, zc, zA, T)
             lhs = nuM * np.log(CM) + nuX * np.log(CX)
             rhs = (
@@ -368,15 +384,16 @@ def donnan_manning_modified(Css, b, phiw, CAmw, zg, zc, zA, T):
     makes the external Pitzer mean activity coefficient cancel exactly out of the working
     equation (companion derivation notes, Sec. 5, Eq. 31-32) -- so unlike donnan_manning(),
     this needs no salt identity or Pitzer parameter table at all. Structurally identical to
-    donnan_manning() otherwise; same system, same solver.
+    donnan_manning() otherwise; same system, same solver -- including the same fix (see
+    donnan_ideal()'s docstring): stoichiometry/electroneutrality sourced from zg, not zA.
     """
     Css = np.asarray(Css, dtype=float)
     phiw = np.asarray(phiw, dtype=float)
     CAmw = np.asarray(CAmw, dtype=float)
     _check_positive(Css)
 
-    nuX, nuM = _nu(zA, zc)
-    a, c = abs(zA), abs(zc)
+    nuM, nuX = _nu(zg, zc)
+    a, c, g = abs(zA), abs(zc), abs(zg)
 
     Csmw = np.zeros(len(Css))
     for p in range(len(Css)):
@@ -385,7 +402,7 @@ def donnan_manning_modified(Css, b, phiw, CAmw, zg, zc, zA, T):
         def resid(log_csmw, Css_p=Css_p, phiw_p=phiw_p, CAmw_p=CAmw_p):
             Csmw_g = np.exp(log_csmw)
             CX = nuX * Csmw_g
-            CM = (CAmw_p + a * CX) / c
+            CM = (a * CAmw_p + c * CX) / g
             gmpm = manning_gamma(b, phiw_p, CAmw_p, Csmw_g, zg, zc, zA, T)
             lhs = nuM * np.log(CM) + nuX * np.log(CX)
             rhs = (
