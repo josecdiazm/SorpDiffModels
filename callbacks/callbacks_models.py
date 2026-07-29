@@ -6,10 +6,10 @@ import colorsys
 
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
-from dash import ALL, MATCH, Input, Output, State, callback, dcc, html
+from dash import Input, Output, State, callback, dcc, html
 
 from tabs.tab_data import PITZER_PARAMS
-from tabs.tab_models import MODEL_REGISTRY, build_equation_content, build_per_dataset_controls
+from tabs.tab_models import MODEL_REGISTRY, build_equation_content
 from utils.dataset_utils import extract_series
 from utils.model_runner import run_model
 from utils.sorption_models import bjerrum_length
@@ -74,36 +74,7 @@ def sync_dataset_options(datasets):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.  Regenerate the per-dataset predict/b controls when the selection changes
-# ─────────────────────────────────────────────────────────────────────────────
-
-@callback(
-    Output("model-per-dataset-controls", "children"),
-    Input("model-dataset-picker", "value"),
-    State("datasets-store", "data"),
-    prevent_initial_call=True,
-)
-def rebuild_per_dataset_controls(dataset_ids, datasets):
-    return build_per_dataset_controls(dataset_ids or [], datasets)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 3.  Show the b input only when that dataset's Predict checkbox is on
-# ─────────────────────────────────────────────────────────────────────────────
-
-@callback(
-    Output({"type": "model-b-input", "index": MATCH}, "style"),
-    Input({"type": "model-predict-check", "index": MATCH}, "value"),
-    prevent_initial_call=True,
-)
-def toggle_b_input(predict_on):
-    base = {"width": "90px"}
-    base["display"] = "inline-block" if predict_on else "none"
-    return base
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4.  Derivation panel: collapse toggle + content keyed to the selected model
+# 2.  Derivation panel: collapse toggle + content keyed to the selected model
 # ─────────────────────────────────────────────────────────────────────────────
 
 @callback(
@@ -126,7 +97,7 @@ def update_equation_content(model_key):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5.  Run Models: the main compute callback
+# 3.  Run Models: the main compute callback
 # ─────────────────────────────────────────────────────────────────────────────
 
 @callback(
@@ -136,20 +107,13 @@ def update_equation_content(model_key):
     Input("model-run-btn", "n_clicks"),
     State("model-dataset-picker", "value"),
     State("model-compare-picker", "value"),
-    State({"type": "model-predict-check", "index": ALL}, "value"),
-    State({"type": "model-predict-check", "index": ALL}, "id"),
-    State({"type": "model-b-input", "index": ALL}, "value"),
-    State({"type": "model-b-input", "index": ALL}, "id"),
     State("datasets-store", "data"),
     prevent_initial_call=True,
 )
-def run_models(n_clicks, dataset_ids, model_keys,
-                predict_vals, predict_ids, b_vals, b_ids, datasets):
+def run_models(n_clicks, dataset_ids, model_keys, datasets):
     dataset_ids = dataset_ids or []
     model_keys = model_keys or []
     datasets = datasets or {}
-    predict_map = {i["index"]: v for i, v in zip(predict_ids, predict_vals)}
-    b_map = {i["index"]: v for i, v in zip(b_ids, b_vals)}
 
     warnings = []
     fig = go.Figure()
@@ -173,17 +137,10 @@ def run_models(n_clicks, dataset_ids, model_keys,
                 marker=dict(color=color, symbol="circle-open", size=9),
             ))
 
-        predict_on = predict_map.get(ds_id, False)
-        b_val = b_map.get(ds_id)
-        if predict_on and b_val is None:
-            warnings.append(f"Dataset '{dataset['name']}': Predict is checked but no b value was entered.")
-            predict_on = False
-
         for model_key in model_keys:
             model_label = MODEL_REGISTRY[model_key]["label"]
             try:
-                out = run_model(model_key, dataset, css, phiw_s, csmw_meas,
-                                 predict_on, b_val, PITZER_PARAMS)
+                out = run_model(model_key, dataset, css, phiw_s, csmw_meas, PITZER_PARAMS)
             except ValueError as exc:
                 warnings.append(str(exc))
                 continue
@@ -193,7 +150,7 @@ def run_models(n_clicks, dataset_ids, model_keys,
             if predictive is None and fitted is None:
                 warnings.append(
                     f"Dataset '{dataset['name']}', {model_label}: nothing to compute — "
-                    "check Predict with a b value, or provide measured Csm,w data."
+                    "set b in the Data tab, or provide measured Csm,w data."
                 )
                 continue
 

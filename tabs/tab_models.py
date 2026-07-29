@@ -5,7 +5,7 @@ and the model's derivation (LaTeX, from the companion derivation notes).
 """
 
 import dash_bootstrap_components as dbc
-from dash import dash_table, dcc, html
+from dash import dcc, html
 
 ELECTRONEUTRALITY_MD = r"Membrane electroneutrality: $$z_g C_g^m + z_c C_c^m + z_A C_A^m = 0$$"
 
@@ -31,9 +31,10 @@ $$(C_g^m)^{\nu_g}(C_c^m)^{\nu_c} = \frac{(\gamma_\pm^{s})^{\nu_g+\nu_c}}
 {(\gamma_g^{m})^{\nu_g}(\gamma_c^{m})^{\nu_c}}\,\nu_g^{\nu_g}\,\nu_c^{\nu_c}\,(C_s^s)^{\nu_g+\nu_c}$$
 """,
         "note": r"Membrane activity coefficients $\gamma_g^m,\gamma_c^m$ come from Manning "
-                r"counter-ion condensation theory (chain spacing $b$); the external "
-                r"$\gamma_\pm^s$ comes from the Pitzer model. Predict with a known $b$, "
-                r"and/or fit $b$ to measured Csm,w data.",
+                r"counter-ion condensation theory (chain spacing $b$, set per-dataset in "
+                r"the Data tab); the external $\gamma_\pm^s$ comes from the Pitzer model. "
+                r"A dataset with $b$ set predicts with it; left blank, $b$ is fit from "
+                r"that dataset's measured Csm,w data instead.",
     },
     "donnan_manning_modified": {
         "label": "Modified Donnan–Manning (Galizia et al.)",
@@ -65,32 +66,6 @@ def build_equation_content(model_key):
     ])
 
 
-def build_per_dataset_controls(dataset_ids, datasets):
-    rows = []
-    for ds_id in dataset_ids:
-        ds = (datasets or {}).get(ds_id)
-        if not ds:
-            continue
-        rows.append(html.Div([
-            html.Span(ds["name"], style={"fontSize": "12px", "fontWeight": "bold",
-                                          "width": "180px", "display": "inline-block"}),
-            dbc.Checkbox(
-                id={"type": "model-predict-check", "index": ds_id},
-                label="Predict with a known b", value=False,
-                style={"display": "inline-block", "marginRight": "10px"},
-            ),
-            dcc.Input(
-                id={"type": "model-b-input", "index": ds_id},
-                type="number", placeholder="b (Å)", step="any",
-                style={"width": "90px", "display": "none"},
-            ),
-        ], style={"display": "flex", "alignItems": "center", "marginBottom": "6px"}))
-    if not rows:
-        rows = [html.Span("Select one or more datasets above.",
-                           style={"fontSize": "12px", "color": "#888"})]
-    return rows
-
-
 layout = dbc.Container(
     fluid=True,
     className="mt-3",
@@ -117,10 +92,9 @@ layout = dbc.Container(
                            size="sm", style={"width": "340px"}),
             ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
 
-            html.Div("Per-dataset settings (unchecked = fit b from measured data)",
-                      style={"fontWeight": "bold", "fontSize": "13px", "marginBottom": "4px"}),
-            html.Div(id="model-per-dataset-controls",
-                      children=build_per_dataset_controls([], {})),
+            html.P("A dataset predicts with its Data-tab b if set, or fits b from its "
+                   "measured data otherwise.",
+                   style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"}),
 
             dbc.Button("Run Models", id="model-run-btn", color="primary", size="sm",
                        className="mt-2"),

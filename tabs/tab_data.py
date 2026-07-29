@@ -29,18 +29,23 @@ DEFAULT_COLUMNS = [
 DEFAULT_ROLES = {"col-css": ROLE_CSS, "col-phiws": ROLE_PHIW_S, "col-csmw": ROLE_CSMW_MEAS}
 DEFAULT_ROWS = [{"col-css": "", "col-phiws": "", "col-csmw": ""} for _ in range(3)]
 
-# (field id, display name, LaTeX symbol (no $ delimiters), default value)
+# (field id, display name, LaTeX symbol (no $ delimiters), default value, placeholder)
 MEMBRANE_PARAM_FIELDS = [
-    ("zg",      "Counter-ion Valence",        "z_g",                    1),
-    ("zc",      "Co-ion Valence",             "z_c",                    -1),
-    ("zA",      "Fixed-charge Valence",       "z_A",                    -1),
-    ("phiw_DI", "Water Volume Fraction",      r"\phi_{w,DI}",           0.3),
-    ("CAmw_DI", "Fixed-charge Concentration", r"C^{m,w}_{A,DI}",        1.0),
-    ("T",       "Temperature",                "T",                      25),
+    ("zg",      "Counter-ion Valence",        "z_g",                    1,    None),
+    ("zc",      "Co-ion Valence",             "z_c",                    -1,   None),
+    ("zA",      "Fixed-charge Valence",       "z_A",                    -1,   None),
+    ("phiw_DI", "Water Volume Fraction",      r"\phi_{w,DI}",           0.3,  None),
+    ("CAmw_DI", "Fixed-charge Concentration", r"C^{m,w}_{A,DI}",        1.0,  None),
+    ("T",       "Temperature",                "T",                      25,  None),
+    # Manning chain spacing: a structural property of this membrane, not a per-run
+    # choice -- leave blank to fit it from measured data in the Sorption Models tab,
+    # or set it here to forward-predict with a known value every time this dataset
+    # is used, without re-entering it per analysis run.
+    ("b",       "Chain Spacing",              "b",                      None, "Å, blank = fit"),
 ]
 
 _LABEL_STYLE = {"fontSize": "14px", "marginRight": "3px"}
-_INPUT_STYLE = {"width": "90px", "marginRight": "14px"}
+_INPUT_STYLE = {"width": "90px", "marginRight": "28px"}
 _SECTION_HEADER_STYLE = {"fontWeight": "bold", "fontSize": "16px", "marginBottom": "4px"}
 
 
@@ -51,7 +56,7 @@ def new_dataset_id():
 def new_dataset(name):
     return {
         "name": name,
-        "membrane_params": {field: default for field, _, _, default in MEMBRANE_PARAM_FIELDS} | {"salt": ""},
+        "membrane_params": {field: default for field, _, _, default, _ in MEMBRANE_PARAM_FIELDS} | {"salt": ""},
         "columns": [dict(c) for c in DEFAULT_COLUMNS],
         "rows": [dict(r) for r in DEFAULT_ROWS],
         "roles": dict(DEFAULT_ROLES),
@@ -95,10 +100,10 @@ def _build_param_inputs(dataset_id, membrane_params, field_specs):
             dcc.Input(
                 id={"type": "dataset-param", "index": dataset_id, "field": field},
                 type="number", value=membrane_params.get(field, default), step="any",
-                style=_INPUT_STYLE,
+                placeholder=placeholder, style=_INPUT_STYLE,
             ),
         ], style={"display": "flex", "alignItems": "center"})
-        for field, name, symbol, default in field_specs
+        for field, name, symbol, default, placeholder in field_specs
     ]
 
 
