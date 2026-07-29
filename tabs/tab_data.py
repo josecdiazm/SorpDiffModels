@@ -39,8 +39,9 @@ MEMBRANE_PARAM_FIELDS = [
     ("T",       "Temperature",                "T",                      25),
 ]
 
-_LABEL_STYLE = {"fontSize": "12px", "marginRight": "3px"}
+_LABEL_STYLE = {"fontSize": "14px", "marginRight": "3px"}
 _INPUT_STYLE = {"width": "90px", "marginRight": "14px"}
+_SECTION_HEADER_STYLE = {"fontWeight": "bold", "fontSize": "16px", "marginBottom": "4px"}
 
 
 def new_dataset_id():
@@ -80,8 +81,15 @@ def build_rolemap_children(dataset_id, columns, roles):
     return items
 
 
-def build_membrane_params_block(dataset_id, membrane_params):
-    fields = [
+# zg, zc (the salt's own ion valences) are "Salt Parameters"; zA, phiw_DI, CAmw_DI, T
+# (properties of the membrane itself) are "Membrane parameters".
+_SALT_PARAM_FIELD_IDS = {"zg", "zc"}
+
+_ROW_STYLE = {"display": "flex", "alignItems": "center", "flexWrap": "wrap", "marginBottom": "10px"}
+
+
+def _build_param_inputs(dataset_id, membrane_params, field_specs):
+    return [
         html.Div([
             dcc.Markdown(f"{name} (${symbol}$)", mathjax=True, className="param-label"),
             dcc.Input(
@@ -90,22 +98,38 @@ def build_membrane_params_block(dataset_id, membrane_params):
                 style=_INPUT_STYLE,
             ),
         ], style={"display": "flex", "alignItems": "center"})
-        for field, name, symbol, default in MEMBRANE_PARAM_FIELDS
+        for field, name, symbol, default in field_specs
     ]
-    fields.append(
-        html.Div([
-            html.Span("Salt:", style=_LABEL_STYLE),
-            dbc.Select(
-                id={"type": "dataset-param", "index": dataset_id, "field": "salt"},
-                options=SALT_OPTIONS,
-                value=membrane_params.get("salt", ""),
-                size="sm",
-                style={"width": "160px"},
-            ),
-        ], style={"display": "flex", "alignItems": "center"})
-    )
-    return html.Div(fields, style={"display": "flex", "alignItems": "center",
-                                    "flexWrap": "wrap", "marginBottom": "10px"})
+
+
+def build_salt_field(dataset_id, membrane_params, style=None):
+    return html.Div([
+        html.Span("Salt:", style=_LABEL_STYLE),
+        dbc.Select(
+            id={"type": "dataset-param", "index": dataset_id, "field": "salt"},
+            options=SALT_OPTIONS,
+            value=membrane_params.get("salt", ""),
+            size="sm",
+            style={"width": "160px"},
+        ),
+    ], style={"display": "flex", "alignItems": "center", **(style or {})})
+
+
+def build_membrane_params_block(dataset_id, membrane_params):
+    salt_param_fields = [f for f in MEMBRANE_PARAM_FIELDS if f[0] in _SALT_PARAM_FIELD_IDS]
+    membrane_fields = [f for f in MEMBRANE_PARAM_FIELDS if f[0] not in _SALT_PARAM_FIELD_IDS]
+
+    salt_param_row = html.Div(
+        _build_param_inputs(dataset_id, membrane_params, salt_param_fields), style=_ROW_STYLE)
+    membrane_row = html.Div(
+        _build_param_inputs(dataset_id, membrane_params, membrane_fields), style=_ROW_STYLE)
+
+    return html.Div([
+        html.Div("Salt Parameters", style=_SECTION_HEADER_STYLE),
+        salt_param_row,
+        html.Div("Membrane parameters", style=_SECTION_HEADER_STYLE),
+        membrane_row,
+    ])
 
 
 def build_dataset_item(dataset_id, dataset):
@@ -119,14 +143,12 @@ def build_dataset_item(dataset_id, dataset):
             ),
             dbc.Button("Delete Dataset", id={"type": "dataset-delete", "index": dataset_id},
                        color="danger", outline=True, size="sm"),
+            build_salt_field(dataset_id, dataset["membrane_params"], style={"marginLeft": "48px"}),
         ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
 
-        html.Div("Membrane parameters", style={"fontWeight": "bold", "fontSize": "13px",
-                                                 "marginBottom": "4px"}),
         build_membrane_params_block(dataset_id, dataset["membrane_params"]),
 
-        html.Div("Concentration-dependent data", style={"fontWeight": "bold", "fontSize": "13px",
-                                                          "marginBottom": "4px"}),
+        html.Div("Concentration-dependent data", style=_SECTION_HEADER_STYLE),
         dash_table.DataTable(
             id={"type": "dataset-table", "index": dataset_id},
             columns=dataset["columns"],
@@ -148,7 +170,7 @@ def build_dataset_item(dataset_id, dataset):
 
     right = html.Div([
         html.Div("Column → model parameter mapping",
-                  style={"fontWeight": "bold", "fontSize": "13px", "marginBottom": "8px"}),
+                  style={**_SECTION_HEADER_STYLE, "marginBottom": "8px"}),
         html.Div(
             build_rolemap_children(dataset_id, dataset["columns"], dataset["roles"]),
             id={"type": "dataset-rolemap", "index": dataset_id},

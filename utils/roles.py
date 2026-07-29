@@ -11,7 +11,7 @@ ROLE_CSMW_MEAS = "csmw_meas"
 
 ROLE_OPTIONS = [
     {"label": "Unassigned", "value": ROLE_UNASSIGNED},
-    {"label": "External concentration, Css (m)", "value": ROLE_CSS},
+    {"label": "External Solution Concentration, Css (m)", "value": ROLE_CSS},
     {"label": "Water volume fraction, φw,s (–)", "value": ROLE_PHIW_S},
     {"label": "Measured membrane concentration, Csm,w (m)", "value": ROLE_CSMW_MEAS},
 ]
