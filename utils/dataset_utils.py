@@ -7,7 +7,7 @@ of the role map is that the display name is unreliable/user-chosen.
 
 import numpy as np
 
-from utils.roles import ROLE_CSMW_MEAS, ROLE_CSS, ROLE_PHIW_S
+from utils.roles import ROLE_CSMW_MEAS, ROLE_CSMW_UNCERTAINTY, ROLE_CSS, ROLE_PHIW_S
 
 
 def _column_id_for_role(dataset, role):
@@ -45,8 +45,8 @@ def _finish_optional(raw_values, label, dataset_name):
 
 
 def extract_series(dataset):
-    """Returns (css, phiw_s, csmw_meas) as numpy arrays; phiw_s/csmw_meas are None if
-    their role isn't mapped to any column (or the column is entirely blank).
+    """Returns (css, phiw_s, csmw_meas, csmw_uncertainty) as numpy arrays; all but css are
+    None if their role isn't mapped to any column (or the column is entirely blank).
     Raises ValueError with a user-facing message on missing/invalid/partially-filled data.
     """
     name = dataset["name"]
@@ -72,11 +72,15 @@ def extract_series(dataset):
 
     phiw_s_col = _column_id_for_role(dataset, ROLE_PHIW_S)
     csmw_col = _column_id_for_role(dataset, ROLE_CSMW_MEAS)
+    csmw_unc_col = _column_id_for_role(dataset, ROLE_CSMW_UNCERTAINTY)
 
     phiw_s_raw = _collect_optional_column(rows, phiw_s_col, css_mask)
     csmw_raw = _collect_optional_column(rows, csmw_col, css_mask)
+    csmw_unc_raw = _collect_optional_column(rows, csmw_unc_col, css_mask)
 
     phiw_s = _finish_optional(phiw_s_raw, "water volume fraction (phiw,s)", name)
     csmw_meas = _finish_optional(csmw_raw, "measured membrane concentration (Csm,w)", name)
+    csmw_uncertainty = _finish_optional(
+        csmw_unc_raw, "measured concentration uncertainty (sigma Csm,w)", name)
 
-    return np.array(css, dtype=float), phiw_s, csmw_meas
+    return np.array(css, dtype=float), phiw_s, csmw_meas, csmw_uncertainty

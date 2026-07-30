@@ -7,6 +7,8 @@ and the model's derivation (LaTeX, from the companion derivation notes).
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
+from utils.sorption_models import FIT_METRICS
+
 ELECTRONEUTRALITY_MD = r"Membrane electroneutrality: $$z_g C_g^m + z_c C_c^m + z_A C_A^m = 0$$"
 
 # Order here is also the order models are computed in "Compare all models" mode.
@@ -53,6 +55,13 @@ $$(C_g^m)^{\nu_g}(C_c^m)^{\nu_c} = \frac{\nu_g^{\nu_g}\,\nu_c^{\nu_c}\,(C_s^s)^{
 
 MODEL_OPTIONS = [{"label": m["label"], "value": key} for key, m in MODEL_REGISTRY.items()]
 
+# Only models with a free parameter b can be fit at all -- Ideal Donnan has none, so it's
+# excluded from both the fit-objective selector's relevance and the uncertainty panel.
+FITTABLE_MODEL_OPTIONS = [
+    {"label": m["label"], "value": key} for key, m in MODEL_REGISTRY.items() if m["needs_b"]
+]
+FIT_METRIC_OPTIONS = [{"label": label, "value": key} for key, label in FIT_METRICS.items()]
+
 _LABEL_STYLE = {"fontSize": "12px", "marginRight": "6px", "fontWeight": "bold"}
 
 
@@ -89,15 +98,60 @@ layout = dbc.Container(
             html.Div([
                 html.Span("Show derivation for:", style=_LABEL_STYLE),
                 dbc.Select(id="model-select", options=MODEL_OPTIONS, value="ideal_donnan",
+                           size="sm", style={"width": "340px", "marginRight": "20px"}),
+                html.Span("Fit objective:", style=_LABEL_STYLE),
+                dbc.Select(id="model-fit-metric", options=FIT_METRIC_OPTIONS, value="rmsle",
                            size="sm", style={"width": "340px"}),
             ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
 
             html.P("A dataset predicts with its Data-tab b if set, or fits b from its "
-                   "measured data otherwise.",
+                   "measured data otherwise, using the fit objective above. \"Weighted RMS "
+                   "Log Error\" needs a column mapped to measurement uncertainty in the "
+                   "Data tab -- datasets without one are skipped with a warning.",
                    style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"}),
 
             dbc.Button("Run Models", id="model-run-btn", color="primary", size="sm",
                        className="mt-2"),
+        ]), className="mb-3"),
+
+        dbc.Card(dbc.CardBody([
+            html.Div("Uncertainty on b", style={"fontWeight": "bold", "fontSize": "14px",
+                                                  "marginBottom": "6px"}),
+            html.P("Bootstrap and Bayesian analysis aren't alternative fit objectives -- "
+                   "they repeatedly apply whichever objective is selected above to see how "
+                   "tightly the data actually constrains b, for one dataset/model at a time.",
+                   style={"fontSize": "12px", "color": "#666", "marginBottom": "8px"}),
+            html.Div([
+                html.Span("Dataset:", style=_LABEL_STYLE),
+                dbc.Select(id="uncertainty-dataset-picker", options=[], value=None,
+                           size="sm", style={"width": "260px", "marginRight": "20px"}),
+                html.Span("Model:", style=_LABEL_STYLE),
+                dbc.Select(id="uncertainty-model-picker", options=FITTABLE_MODEL_OPTIONS,
+                           value="donnan_manning_modified", size="sm",
+                           style={"width": "300px"}),
+            ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
+            html.Div([
+                html.Span("Method:", style=_LABEL_STYLE),
+                dbc.RadioItems(
+                    id="uncertainty-method",
+                    options=[{"label": "Bootstrap", "value": "bootstrap"},
+                             {"label": "Bayesian (flat prior)", "value": "bayesian"}],
+                    value="bootstrap", inline=True,
+                    style={"display": "inline-block", "marginRight": "20px"},
+                ),
+                html.Span("Resamples:", style=_LABEL_STYLE),
+                dcc.Input(id="uncertainty-n-resamples", type="number", value=200,
+                          min=20, max=2000, step=10, style={"width": "80px", "marginRight": "20px"}),
+                html.Span("b max (Å), Bayesian prior range:", style=_LABEL_STYLE),
+                dcc.Input(id="uncertainty-b-max", type="number", value=30,
+                          min=1, max=1000, step="any", style={"width": "80px"}),
+            ], style={"display": "flex", "alignItems": "center", "marginBottom": "10px"}),
+            dbc.Button("Run Uncertainty Analysis", id="uncertainty-run-btn",
+                       color="primary", size="sm", outline=True),
+            html.Div(id="uncertainty-alert", className="mt-2"),
+            dcc.Graph(id="uncertainty-plot", style={"height": "380px"},
+                      config={"displayModeBar": True}),
+            html.Div(id="uncertainty-summary"),
         ]), className="mb-3"),
 
         dbc.Card(dbc.CardBody([

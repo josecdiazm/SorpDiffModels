@@ -420,10 +420,90 @@ def donnan_manning_modified(Css, b, phiw, CAmw, zg, zc, zA, T):
 
 _B_FIT_BOUNDS = (1e-3, 1e4)  # Angstrom; generous bracket for the bounded 1-D minimizer below
 
+# Fit objectives available from the Sorption Models tab. "weighted_rmsle" needs a dataset
+# column mapped to the csmw_uncertainty role; the tab is responsible for enforcing that.
+FIT_METRICS = {
+    "rmsle": "RMS Log Error (Kitto & Kamcev's metric)",
+    "rmse": "RMS Error (linear)",
+    "weighted_rmsle": "Weighted RMS Log Error (needs measurement uncertainty)",
+}
 
-def manning_b_fitter_modified(Css, phiw, Csmw, CAmw, zg, zc, zA, T):
-    """Fit b (Angstrom) to measured sorption data for the modified model -- same RMS log
-    error approach as manning_b_fitter(), no salt/Pitzer table needed."""
+
+def rmsle(Csmw_theoretical, Csmw_actual):
+    Csmw_theoretical = np.asarray(Csmw_theoretical, dtype=float)
+    Csmw_actual = np.asarray(Csmw_actual, dtype=float)
+    if len(Csmw_theoretical) != len(Csmw_actual):
+        raise ValueError("Number of theoretical and actual partitioning data points disagree.")
+    LE = np.log10(Csmw_actual / Csmw_theoretical)
+    return float((np.sum(LE**2) / len(LE)) ** 0.5)
+
+
+def rmse(Csmw_theoretical, Csmw_actual):
+    """Plain (linear) RMS error, in Csmw's own units. Unlike rmsle(), a squared-error sum
+    in linear space is dominated by whichever points have the largest absolute magnitude --
+    for a series spanning multiple concentration decades, minimizing this effectively
+    ignores the low-concentration points in favor of nailing the highest one."""
+    Csmw_theoretical = np.asarray(Csmw_theoretical, dtype=float)
+    Csmw_actual = np.asarray(Csmw_actual, dtype=float)
+    if len(Csmw_theoretical) != len(Csmw_actual):
+        raise ValueError("Number of theoretical and actual partitioning data points disagree.")
+    return float(np.sqrt(np.mean((Csmw_theoretical - Csmw_actual) ** 2)))
+
+
+def weighted_rmsle(Csmw_theoretical, Csmw_actual, csmw_uncertainty):
+    """RMS log error, inverse-variance weighted by each point's log-space uncertainty.
+    csmw_uncertainty is a linear-space standard deviation on Csmw_actual (same units as
+    Csmw); propagated to log10-space via the standard first-order formula for a log
+    transform, sigma_log = sigma / (Csmw_actual * ln(10))."""
+    Csmw_theoretical = np.asarray(Csmw_theoretical, dtype=float)
+    Csmw_actual = np.asarray(Csmw_actual, dtype=float)
+    csmw_uncertainty = np.asarray(csmw_uncertainty, dtype=float)
+    if not (len(Csmw_theoretical) == len(Csmw_actual) == len(csmw_uncertainty)):
+        raise ValueError("Theoretical, actual, and uncertainty arrays must be the same length.")
+    LE = np.log10(Csmw_actual / Csmw_theoretical)
+    sigma_log = csmw_uncertainty / (Csmw_actual * np.log(10))
+    weights = 1.0 / sigma_log**2
+    return float(np.sqrt(np.average(LE**2, weights=weights)))
+
+
+def log_r_squared(Csmw_theoretical, Csmw_actual):
+    """Coefficient of determination computed in log10-space: the fraction of the
+    log-concentration data's own spread (relative to its mean) that the model explains,
+    vs. RMSLE's absolute log-error scale. Two salts fit with the same RMSLE aren't
+    equally "well explained" if one spans 3 concentration decades and the other spans 1 --
+    R^2 normalizes for that, making cross-salt/cross-dataset comparisons fairer. Maximizing
+    this gives the identical b as minimizing RMSLE (same optimum, just rescaled); it's a
+    reporting metric, not a distinct fit objective."""
+    Csmw_theoretical = np.asarray(Csmw_theoretical, dtype=float)
+    Csmw_actual = np.asarray(Csmw_actual, dtype=float)
+    log_actual = np.log10(Csmw_actual)
+    log_pred = np.log10(Csmw_theoretical)
+    ss_res = np.sum((log_actual - log_pred) ** 2)
+    ss_tot = np.sum((log_actual - np.mean(log_actual)) ** 2)
+    if ss_tot == 0:
+        return float("nan")
+    return float(1 - ss_res / ss_tot)
+
+
+def fit_error(Csmw_theoretical, Csmw_actual, metric="rmsle", csmw_uncertainty=None):
+    """Single entry point for every fit-quality metric this module supports -- the b
+    fitters below, and any bootstrap/Bayesian resampling built on them, always go through
+    this rather than each hardcoding an error formula."""
+    if metric == "rmsle":
+        return rmsle(Csmw_theoretical, Csmw_actual)
+    if metric == "rmse":
+        return rmse(Csmw_theoretical, Csmw_actual)
+    if metric == "weighted_rmsle":
+        if csmw_uncertainty is None:
+            raise ValueError("weighted_rmsle requires per-point measurement uncertainty.")
+        return weighted_rmsle(Csmw_theoretical, Csmw_actual, csmw_uncertainty)
+    raise ValueError(f"Unknown fit metric: {metric!r}")
+
+
+def manning_b_fitter_modified(Css, phiw, Csmw, CAmw, zg, zc, zA, T,
+                               metric="rmsle", csmw_uncertainty=None):
+    """Fit b (Angstrom) to measured sorption data for the modified model -- no salt/Pitzer
+    table needed. `metric` selects the fit-quality objective; see fit_error()."""
     Css = np.asarray(Css, dtype=float)
     _check_positive(Css)
 
@@ -432,8 +512,7 @@ def manning_b_fitter_modified(Css, phiw, Csmw, CAmw, zg, zc, zA, T):
             return 1e10
         try:
             pred = donnan_manning_modified(Css, b_guess, phiw, CAmw, zg, zc, zA, T)
-            LE = np.log10(pred) - np.log10(Csmw)
-            return float((np.sum(LE**2) / len(LE)) ** 0.5)
+            return fit_error(pred, Csmw, metric=metric, csmw_uncertainty=csmw_uncertainty)
         except (RuntimeError, FloatingPointError):
             return 1e10
 
@@ -442,10 +521,13 @@ def manning_b_fitter_modified(Css, phiw, Csmw, CAmw, zg, zc, zA, T):
     return res.x
 
 
-def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df):
-    """Fit the Manning parameter b (Angstrom) to measured sorption data via RMS log error.
+def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df,
+                      metric="rmsle", csmw_uncertainty=None):
+    """Fit the Manning parameter b (Angstrom) to measured sorption data. `metric` selects
+    the fit-quality objective (see fit_error()); defaults to Kitto & Kamcev's own RMS log
+    error.
 
-    Uses a bounded 1-D minimizer, not a root-finder: the RMS log error is >= 0 everywhere
+    Uses a bounded 1-D minimizer, not a root-finder: every metric here is >= 0 everywhere
     and hits exactly 0 only at the true b, i.e. it's a V-shaped distance function with no
     sign change for fsolve to bracket. (The original MATLAB Manning_b_Fitter.m used
     MATLAB's fsolve the same way, which has the identical issue -- verified fsolve() here
@@ -459,8 +541,7 @@ def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df):
             return 1e10  # b (Angstrom) must be positive; steer the search back
         try:
             pred = donnan_manning(salt, Css, b_guess, phiw, CAmw, zg, zc, zA, T, params_df)
-            LE = np.log10(pred) - np.log10(Csmw)
-            return float((np.sum(LE**2) / len(LE)) ** 0.5)
+            return fit_error(pred, Csmw, metric=metric, csmw_uncertainty=csmw_uncertainty)
         except (RuntimeError, FloatingPointError):
             # extreme b transiently explored by the minimizer can push manning_gamma out of
             # its numerically valid range; treat as a bad fit rather than crashing the search
@@ -469,15 +550,6 @@ def manning_b_fitter(salt, Css, phiw, Csmw, CAmw, zg, zc, zA, T, params_df):
     with _quiet_solver():
         res = minimize_scalar(error_fitter, bounds=_B_FIT_BOUNDS, method="bounded")
     return res.x
-
-
-def rmsle(Csmw_theoretical, Csmw_actual):
-    Csmw_theoretical = np.asarray(Csmw_theoretical, dtype=float)
-    Csmw_actual = np.asarray(Csmw_actual, dtype=float)
-    if len(Csmw_theoretical) != len(Csmw_actual):
-        raise ValueError("Number of theoretical and actual partitioning data points disagree.")
-    LE = np.log10(Csmw_actual / Csmw_theoretical)
-    return float((np.sum(LE**2) / len(LE)) ** 0.5)
 
 
 def compute_CAmw_series(phiw_DI, CAmw_DI, phiw_s):
@@ -518,9 +590,12 @@ def run_ideal_donnan(zg, zc, zA, phiw_DI, CAmw_DI, Css, phiw_s=None, Csmw_meas=N
 
 
 def run_donnan_manning(salt, zg, zc, zA, phiw_DI, CAmw_DI, T, Css, params_df,
-                        phiw_s=None, Csmw_meas=None, b=None):
+                        phiw_s=None, Csmw_meas=None, b=None,
+                        fit_metric="rmsle", csmw_uncertainty=None):
     """Run the Donnan-Manning model for one membrane: predictive (if b given) and/or fitted
-    (if measured Csmw given). Returns a dict with whichever of 'predictive'/'fitted' apply."""
+    (if measured Csmw given). Returns a dict with whichever of 'predictive'/'fitted' apply.
+    fit_metric selects the objective b is fit by (see fit_error()); the reported 'rmsle'
+    and 'log_r2' are always computed the standard way regardless, for comparability."""
     Css = np.asarray(Css, dtype=float)
     n = len(Css)
     phiw_s_arr = np.full(n, phiw_DI) if phiw_s is None or len(phiw_s) == 0 else np.asarray(phiw_s, dtype=float)
@@ -537,14 +612,16 @@ def run_donnan_manning(salt, zg, zc, zA, phiw_DI, CAmw_DI, T, Css, params_df,
             "Css (m)": Css, "phiw_s (-)": phiw_s_arr, "CAm,w (m)": CAmw_s,
             "Csm,w DM Predicted (m)": Csmw_pred,
         })
-        rmsle_val = None
+        rmsle_val = log_r2_val = None
         if have_meas:
             df["Csm,w measured (m)"] = Csmw_meas_arr
             rmsle_val = rmsle(Csmw_pred, Csmw_meas_arr)
-        out["predictive"] = {"b": b, "table": df, "rmsle": rmsle_val}
+            log_r2_val = log_r_squared(Csmw_pred, Csmw_meas_arr)
+        out["predictive"] = {"b": b, "table": df, "rmsle": rmsle_val, "log_r2": log_r2_val}
 
     if have_meas:
-        b_fit = manning_b_fitter(salt, Css, phiw_s_arr, Csmw_meas_arr, CAmw_s, zg, zc, zA, T, params_df)
+        b_fit = manning_b_fitter(salt, Css, phiw_s_arr, Csmw_meas_arr, CAmw_s, zg, zc, zA, T, params_df,
+                                  metric=fit_metric, csmw_uncertainty=csmw_uncertainty)
         Csmw_fit = donnan_manning(salt, Css, b_fit, phiw_s_arr, CAmw_s, zg, zc, zA, T, params_df)
         xip_fit = bjerrum_length(phiw_DI, T) * abs(zg * zA) / b_fit
         df = pd.DataFrame({
@@ -552,13 +629,16 @@ def run_donnan_manning(salt, zg, zc, zA, phiw_DI, CAmw_DI, T, Css, params_df,
             "Csm,w DM Fitted (m)": Csmw_fit, "Csm,w measured (m)": Csmw_meas_arr,
         })
         rmsle_val = rmsle(Csmw_fit, Csmw_meas_arr)
-        out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df, "rmsle": rmsle_val}
+        log_r2_val = log_r_squared(Csmw_fit, Csmw_meas_arr)
+        out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df,
+                          "rmsle": rmsle_val, "log_r2": log_r2_val}
 
     return out
 
 
 def run_donnan_manning_modified(zg, zc, zA, phiw_DI, CAmw_DI, T, Css,
-                                 phiw_s=None, Csmw_meas=None, b=None):
+                                 phiw_s=None, Csmw_meas=None, b=None,
+                                 fit_metric="rmsle", csmw_uncertainty=None):
     """Run the modified Donnan-Manning model for one membrane: predictive (if b given)
     and/or fitted (if measured Csmw given). Same shape as run_donnan_manning(), minus the
     salt/params_df the Pitzer-free closure no longer needs."""
@@ -578,14 +658,16 @@ def run_donnan_manning_modified(zg, zc, zA, phiw_DI, CAmw_DI, T, Css,
             "Css (m)": Css, "phiw_s (-)": phiw_s_arr, "CAm,w (m)": CAmw_s,
             "Csm,w Modified DM Predicted (m)": Csmw_pred,
         })
-        rmsle_val = None
+        rmsle_val = log_r2_val = None
         if have_meas:
             df["Csm,w measured (m)"] = Csmw_meas_arr
             rmsle_val = rmsle(Csmw_pred, Csmw_meas_arr)
-        out["predictive"] = {"b": b, "table": df, "rmsle": rmsle_val}
+            log_r2_val = log_r_squared(Csmw_pred, Csmw_meas_arr)
+        out["predictive"] = {"b": b, "table": df, "rmsle": rmsle_val, "log_r2": log_r2_val}
 
     if have_meas:
-        b_fit = manning_b_fitter_modified(Css, phiw_s_arr, Csmw_meas_arr, CAmw_s, zg, zc, zA, T)
+        b_fit = manning_b_fitter_modified(Css, phiw_s_arr, Csmw_meas_arr, CAmw_s, zg, zc, zA, T,
+                                           metric=fit_metric, csmw_uncertainty=csmw_uncertainty)
         Csmw_fit = donnan_manning_modified(Css, b_fit, phiw_s_arr, CAmw_s, zg, zc, zA, T)
         xip_fit = bjerrum_length(phiw_DI, T) * abs(zg * zA) / b_fit
         df = pd.DataFrame({
@@ -593,6 +675,8 @@ def run_donnan_manning_modified(zg, zc, zA, phiw_DI, CAmw_DI, T, Css,
             "Csm,w Modified DM Fitted (m)": Csmw_fit, "Csm,w measured (m)": Csmw_meas_arr,
         })
         rmsle_val = rmsle(Csmw_fit, Csmw_meas_arr)
-        out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df, "rmsle": rmsle_val}
+        log_r2_val = log_r_squared(Csmw_fit, Csmw_meas_arr)
+        out["fitted"] = {"b_fit": b_fit, "xip_fit": xip_fit, "table": df,
+                          "rmsle": rmsle_val, "log_r2": log_r2_val}
 
     return out
