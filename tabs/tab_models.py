@@ -165,8 +165,18 @@ layout = dbc.Container(
 
         dbc.Card(dbc.CardBody([
             html.Div(id="model-alert"),
-            dcc.Graph(id="model-plot", style={"height": "560px"},
-                      config={"displayModeBar": True}),
+            html.Div([
+                html.Div(
+                    dcc.Graph(id="model-plot", style={"height": "560px"},
+                              config={"displayModeBar": True}),
+                    style={"width": "calc(50% - 0.5rem)"},
+                ),
+                html.Div(
+                    dcc.Graph(id="model-ks-plot", style={"height": "560px"},
+                              config={"displayModeBar": True}),
+                    style={"width": "calc(50% - 0.5rem)"},
+                ),
+            ], style={"display": "flex", "gap": "1rem", "alignItems": "flex-start"}),
         ]), className="mb-3"),
 
         dbc.Card(dbc.CardBody([
