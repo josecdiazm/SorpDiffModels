@@ -104,6 +104,7 @@ def update_equation_content(model_key):
 
 @callback(
     Output("model-plot", "figure"),
+    Output("model-ks-plot", "figure"),
     Output("model-results-table", "children"),
     Output("model-alert", "children"),
     Input("model-run-btn", "n_clicks"),
@@ -120,6 +121,7 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
 
     warnings = []
     fig = go.Figure()
+    fig_ks = go.Figure()
     result_rows = []
 
     for ds_i, ds_id in enumerate(dataset_ids):
@@ -138,6 +140,10 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
             fig.add_trace(go.Scatter(
                 x=css, y=csmw_meas, mode="markers", name=f"{dataset['name']} — measured",
                 marker=dict(color=color, symbol="circle-open", size=9),
+            ))
+            fig_ks.add_trace(go.Scatter(
+                x=css, y=csmw_meas / css, mode="markers", name=f"{dataset['name']} — measured",
+                marker=dict(color=color, symbol="circle-open", size=9), showlegend=False,
             ))
 
         for model_key in model_keys:
@@ -168,6 +174,11 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
                     name=f"{dataset['name']} — {model_label} (predicted)",
                     line=dict(color=model_shade, dash=_dash_for(model_key, True)),
                 ))
+                fig_ks.add_trace(go.Scatter(
+                    x=df["Css (m)"], y=df[pred_col] / df["Css (m)"], mode="lines",
+                    name=f"{dataset['name']} — {model_label} (predicted)",
+                    line=dict(color=model_shade, dash=_dash_for(model_key, True)), showlegend=False,
+                ))
                 xi, xi_crit = _xi_values(dataset, predictive["b"])
                 result_rows.append([dataset["name"], model_label, "Predicted",
                                      f"{predictive['b']:.4g}" if predictive["b"] is not None else "—",
@@ -184,6 +195,11 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
                     name=f"{dataset['name']} — {model_label} (fitted)",
                     line=dict(color=model_shade, dash=_dash_for(model_key, False)),
                 ))
+                fig_ks.add_trace(go.Scatter(
+                    x=df["Css (m)"], y=df[fit_col] / df["Css (m)"], mode="lines",
+                    name=f"{dataset['name']} — {model_label} (fitted)",
+                    line=dict(color=model_shade, dash=_dash_for(model_key, False)), showlegend=False,
+                ))
                 xi, xi_crit = _xi_values(dataset, fitted["b_fit"])
                 result_rows.append([dataset["name"], model_label, "Fitted",
                                      f"{fitted['b_fit']:.4g}", f"{fitted['rmsle']:.4g}",
@@ -196,6 +212,15 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
         xaxis_title="Css (m)", yaxis_title="Csm,w (m)",
         xaxis_type="log", yaxis_type="log",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=60, r=20, t=80, b=60),
+        template="plotly_white",
+    )
+
+    fig_ks.update_layout(
+        title="Sorption Coefficient",
+        xaxis_title="Css (m)", yaxis_title="Ks = Csm,w / Css (sorbed-water basis)",
+        xaxis_type="log", yaxis_type="log",
+        showlegend=False,
         margin=dict(l=60, r=20, t=80, b=60),
         template="plotly_white",
     )
@@ -219,7 +244,7 @@ def run_models(n_clicks, dataset_ids, model_keys, fit_metric, datasets):
 
     alert = dbc.Alert([html.Div(w) for w in warnings], color="warning") if warnings else None
 
-    return fig, table, alert
+    return fig, fig_ks, table, alert
 
 
 # ─────────────────────────────────────────────────────────────────────────────
