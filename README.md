@@ -37,6 +37,5 @@ The app runs at [http://127.0.0.1:8060](http://127.0.0.1:8060).
 
 - `utils/sorption_models.py` implements the Donnan sorption models (Pitzer activity coefficients for the external solution, Manning counter-ion condensation theory for the membrane phase).
 - `data/Pitzer Params.xlsx` is the Pitzer parameter lookup table used for solution-phase activity coefficients.
-- `notebooks/` holds the original Jupyter/ipywidgets notebooks (`Ideal_Donnan_Model.ipynb`, `Donnan_Manning_Model.ipynb`) that predate this web app; kept as a reference implementation.
 - **If a dataset's φw,s (water volume fraction) column is left blank**, every model falls back to holding it constant at that dataset's φw,DI for every concentration point — i.e. no osmotic deswelling correction is applied, and CAm,w works out constant at CAm,w,DI too rather than varying with concentration. Fill in φw,s per point if you want that correction. The column is all-or-nothing: partially filling it in (some rows but not others) raises a validation error rather than silently mixing measured and defaulted values.
 - This is a local-only tool (server and browser on the same machine) — it is not hardened for exposure on a network.
