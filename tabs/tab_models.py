@@ -165,6 +165,7 @@ layout = dbc.Container(
 
         dbc.Card(dbc.CardBody([
             html.Div(id="model-alert"),
+            dcc.Store(id="ks-legend-sync-dummy"),
             html.Div([
                 html.Div(
                     dcc.Graph(id="model-plot", style={"height": "560px"},

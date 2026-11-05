@@ -7,7 +7,7 @@ import colorsys
 import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, dcc, html
+from dash import Input, Output, State, callback, clientside_callback, dcc, html
 
 from tabs.tab_data import PITZER_PARAMS
 from tabs.tab_models import MODEL_REGISTRY, build_equation_content
@@ -96,6 +96,34 @@ def toggle_equations(n_clicks, is_open):
 )
 def update_equation_content(model_key):
     return build_equation_content(model_key)
+
+
+# Mirror legend clicks on the isotherm plot onto the Ks plot (which hides its own legend).
+# run_models() adds traces to both figures in the same order, so trace indices match.
+# Restyled directly in the browser so nothing is recomputed or re-sent from the server.
+clientside_callback(
+    """
+    function(restyleData) {
+        if (!restyleData) { return window.dash_clientside.no_update; }
+        var update = restyleData[0], idx = restyleData[1];
+        if (!update || !("visible" in update)) { return window.dash_clientside.no_update; }
+        var gd = document.querySelector("#model-ks-plot .js-plotly-plot");
+        if (gd && window.Plotly) {
+            var n = gd.data ? gd.data.length : 0;
+            var vis = Array.isArray(update.visible) ? update.visible : [update.visible];
+            var keep = [], vals = [];
+            (idx || []).forEach(function(i, k) {
+                if (i < n) { keep.push(i); vals.push(vis.length === 1 ? vis[0] : vis[k]); }
+            });
+            if (keep.length) { window.Plotly.restyle(gd, {visible: vals}, keep); }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("ks-legend-sync-dummy", "data"),
+    Input("model-plot", "restyleData"),
+    prevent_initial_call=True,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
