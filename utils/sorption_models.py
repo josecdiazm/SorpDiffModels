@@ -207,8 +207,7 @@ def _gamma_g(xi, X, zg_M, zp_M, zc_M, nu_g, nu_c):
     Eq. 11 (Kamcev is a co-author of both). Valid for xi > xicrit = 1/|zg_M*zp_M| (the
     counter-ion condensation regime, which covers essentially all real IEM systems). zg_M,
     zc_M, zp_M are the counter-ion, co-ion, and fixed-charge valence (unsigned) -- "M" for
-    Manning-theory notation, since this is a different pairing from this module's zg
-    (fixed-charge valence, i.e. zp_M = |zg| here).
+    Manning-theory notation; they map to this module's |zg|, |zc|, |zA| respectively.
 
     Note: a related but distinct source (Sujanani, UT Austin dissertation 2022, Eq. 2.21,
     not co-authored by Kamcev) uses z_g*nu_g in the exponent term below instead of z_g*z_c
@@ -234,14 +233,23 @@ def manning_gamma(b, phiw, CAmw, Csmw, zg, zc, zA, T):
     et al. 2016 Eqs. 7-9, generalized to arbitrary fixed-charge valence per Kitto & Kamcev
     2022 Eqs. 6-7, 11-12 -- cross-checked against both papers' worked equations for 1:1, 2:1
     and 2:2 salts (NaCl, CaCl2/MgCl2/Na2SO4, MgSO4 respectively), all exact. See module
-    docstring for why this replaced the original MATLAB Manning.m's formula, which mixed up
-    Manning-theory "z_g" (counter-ion valence) with this module's zg (fixed-charge valence)."""
-    nuX, nuM = _nu(zA, zc)  # co-ion, counter-ion counts per formula unit
+    docstring for why this replaced the original MATLAB Manning.m's formula.
+
+    Valence convention (same as the GUI and the Donnan solvers): zg = counter-ion, zc =
+    co-ion, zA = fixed charge. Known fix: this function previously still used the older
+    convention (zg = fixed charge, zc = counter-ion, zA = co-ion, with nu from (zA, zc)),
+    left behind when donnan_ideal/donnan_manning were switched over. Harmless for 1:1 salts
+    on a monovalent polymer (all valences 1 -- NaCl etc. bitwise unchanged), but for MgCl2/
+    CaCl2 on CR61 it modeled a monovalent counter-ion on a divalent fixed charge with 1:1
+    stoichiometry. Fixing it brings Kitto & Kamcev's CR61 MgCl2 inputs (phiw,DI 0.50,
+    CAm,w,DI 3.21 M, b 7.3 A) to RMSLE 0.067 against measured data, vs. Galizia et al.'s
+    reported 0.07 -- closing the residual gap noted in donnan_ideal()'s docstring."""
+    nuM, nuX = _nu(zg, zc)  # counter-ion, co-ion counts per formula unit
     X = CAmw / Csmw
 
     lb = bjerrum_length(phiw, T)
     xi = lb / b
-    zg_M, zc_M, zp_M = abs(zc), abs(zA), abs(zg)  # Manning-theory counter-ion, co-ion, fixed-charge valence
+    zg_M, zc_M, zp_M = abs(zg), abs(zc), abs(zA)  # Manning-theory counter-ion, co-ion, fixed-charge valence
     xicrit = 1 / (zg_M * zp_M)
 
     if xi > xicrit:
@@ -308,7 +316,8 @@ def donnan_ideal(Css, CAmw, zg, zc, zA):
     data for CR61: this fix does not change any 1:1-valence-salt prediction at all (bitwise
     identical), and brings CaCl2 back in line with Galizia et al.'s reported fit (RMS log
     error 0.53 -> 0.15, vs. their reported 0.16) with a substantial improvement for MgCl2
-    too (0.53 -> 0.23, vs. their reported 0.07 -- a smaller residual gap not yet chased down).
+    too (0.53 -> 0.23, vs. their reported 0.07). That remaining gap was manning_gamma() still
+    using the old valence mapping; with it fixed too, MgCl2 is at 0.067 (see its docstring).
     """
     Css = np.asarray(Css, dtype=float)
     CAmw = np.asarray(CAmw, dtype=float)
